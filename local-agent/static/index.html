@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local AI Agent</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#2a2f3a;--text:#e6e8ee;--dim:#8a93a6;--acc:#5b8cff;--ok:#3fb950;--warn:#d29922;--bad:#f85149}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:16px;margin:0;flex:1}.pill{padding:2px 10px;border-radius:99px;background:#222836;color:var(--dim);font-size:12px}
+main{flex:1;display:flex;min-height:0}#chat{flex:1;display:flex;flex-direction:column;min-width:0}
+#feed{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
+.card .h{font-size:12px;color:var(--dim);margin-bottom:4px}.user{border-color:var(--acc)}.done{border-color:var(--ok)}.err{border-color:var(--bad)}
+.appr{border-color:var(--warn)}.plan{border-color:#a371f7}code,pre,textarea.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+pre{margin:6px 0 0;max-height:260px;overflow:auto;background:#0b0d11;padding:8px;border-radius:6px}
+details summary{cursor:pointer;color:var(--dim)}
+#compose{border-top:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--panel)}
+textarea{width:100%;background:#0b0d11;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px;resize:vertical}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,select,input{background:#222836;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font:inherit}
+button{cursor:pointer}button.primary{background:var(--acc);border-color:var(--acc);color:#fff}button.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+button.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+#log{width:44%;border-left:1px solid var(--line);display:none;flex-direction:column;background:#0b0d11}
+#log.show{display:flex}#log .bar{padding:6px 10px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center;color:var(--dim)}
+#logout{flex:1;overflow:auto;margin:0;padding:8px 10px;font:12px/1.45 ui-monospace,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+.l-error{color:var(--bad)}.l-tool_call{color:#56d4dd}.l-tool_result{color:#6e7681}.l-approval{color:var(--warn)}.l-agent_done,.l-result{color:var(--ok)}.l-plan{color:#a371f7}.l-state{color:var(--acc)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;width:min(520px,92vw)}
+dialog label{display:block;margin:8px 0 2px;color:var(--dim);font-size:12px}dialog input{width:100%}
+.hint{color:var(--dim);font-size:12px}
+@media (max-width:800px){#log.show{position:fixed;inset:50% 0 0 0;width:100%;border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Local AI Agent</h1>
+  <span class="pill" id="state">idle</span>
+  <button id="logBtn">Show log</button>
+  <button id="setBtn">Settings</button>
+</header>
+<main>
+  <section id="chat">
+    <div id="feed"><div class="card hint">Give the agent an objective below. Pick a mode:
+<b>Full autonomy</b> – works until done or you press Stop.
+<b>Planning</b> – writes a proposal first; you approve (and can edit) it before anything runs.
+<b>Manual</b> – every file edit / shell command waits for your approval.</div></div>
+    <div id="compose">
+      <textarea id="task" rows="3" placeholder="e.g. Research the 3 best open-source note apps and write a comparison to notes/compare.md"></textarea>
+      <div class="row">
+        <select id="mode">
+          <option value="auto">Full autonomy</option>
+          <option value="plan">Planning mode</option>
+          <option value="manual">Manual (approve edits)</option>
+        </select>
+        <button class="primary" id="go">Run</button>
+        <button class="danger" id="stop">Stop</button>
+        <span class="hint">Ctrl+Enter to run</span>
+      </div>
+    </div>
+  </section>
+  <aside id="log">
+    <div class="bar">Verbose log <span style="flex:1"></span><label><input type="checkbox" id="autoscroll" checked> autoscroll</label><button id="clearLog">Clear</button></div>
+    <pre id="logout"></pre>
+  </aside>
+</main>
+
+<dialog id="settings"><form method="dialog">
+  <h3 style="margin-top:0">Settings</h3>
+  <label>LLM base URL (OpenAI-compatible: Ollama, LM Studio, llama.cpp…)</label><input id="s_base_url">
+  <label>Model</label><input id="s_model">
+  <label>API key (any value for local servers)</label><input id="s_api_key">
+  <label>Workspace folder (the only folder the agent can touch)</label><input id="s_workspace">
+  <label>Max steps per agent (0 = unlimited)</label><input id="s_max_steps" type="number">
+  <label>Temperature</label><input id="s_temperature" type="number" step="0.1">
+  <div class="row" style="margin-top:14px;justify-content:flex-end"><button value="cancel">Cancel</button><button class="primary" id="saveSet" value="ok">Save</button></div>
+</form></dialog>
+
+<script>
+const $ = id => document.getElementById(id), feed = $('feed'), logout = $('logout');
+const api = (path, body) => fetch(path, {method: body ? 'POST' : 'GET', headers: {'Content-Type': 'application/json'},
+  body: body ? JSON.stringify(body) : undefined}).then(r => r.json());
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+
+function card(cls, head, html) {
+  const d = document.createElement('div'); d.className = 'card ' + cls;
+  d.innerHTML = `<div class="h">${esc(head)}</div>${html}`;
+  feed.appendChild(d); feed.scrollTop = feed.scrollHeight; return d;
+}
+
+function logLine(e) {
+  const s = document.createElement('span'); s.className = 'l-' + e.type;
+  s.textContent = `[${e.t}] ${e.type.padEnd(12)} ${JSON.stringify(e.data)}\n`;
+  logout.appendChild(s); if ($('autoscroll').checked) logout.scrollTop = logout.scrollHeight;
+}
+
+function handle(e) {
+  logLine(e); const d = e.data, who = d.agent ? `[${d.agent}] ` : '';
+  switch (e.type) {
+    case 'task': card('user', `You · ${d.mode}`, esc(d.task)); break;
+    case 'state': $('state').textContent = d.state.replace('_', ' '); break;
+    case 'llm': if (d.content) card('', `${who}thinking (${d.seconds}s)`, esc(d.content)); break;
+    case 'tool_call': card('', `${who}tool`, `<code>${esc(d.tool)}</code><details><summary>arguments</summary><pre>${esc(JSON.stringify(d.args, null, 2))}</pre></details>`); break;
+    case 'tool_result': { const c = feed.lastElementChild; if (c) c.insertAdjacentHTML('beforeend', `<details><summary>result</summary><pre>${esc(d.result)}</pre></details>`); break; }
+    case 'agent_start': if (d.agent !== 'main') card('', `${who}sub-agent started`, esc(d.task)); break;
+    case 'agent_done': if (d.agent !== 'main') card('done', `${who}sub-agent finished`, esc(d.summary)); break;
+    case 'approval': approvalCard(d); break;
+    case 'plan': planCard(d.plan); break;
+    case 'result': card('done', 'Finished', esc(d.summary)); break;
+    case 'error': card('err', 'Error', esc(d.text)); break;
+    case 'info': card('', 'Info', esc(d.text)); break;
+  }
+}
+
+function approvalCard(d) {
+  const preview = d.tool === 'write_file' ? `<b>${esc(d.args.path)}</b><pre>${esc(d.args.content)}</pre>`
+    : d.tool === 'edit_file' ? `<b>${esc(d.args.path)}</b><pre>- ${esc(d.args.old)}\n+ ${esc(d.args.new)}</pre>`
+    : `<pre>${esc(JSON.stringify(d.args, null, 2))}</pre>`;
+  const c = card('appr', `[${d.agent}] wants to run ${d.tool} — approve?`, preview +
+    `<div class="row" style="margin-top:8px"><button class="ok">Approve</button><button class="danger">Reject</button></div>`);
+  const [ok, no] = c.querySelectorAll('button');
+  const send = approved => api('/api/approve', {id: d.id, approved}).then(() => {
+    c.querySelector('.row').outerHTML = `<div class="hint">${approved ? 'Approved' : 'Rejected'}</div>`; });
+  ok.onclick = () => send(true); no.onclick = () => send(false);
+}
+
+function planCard(plan) {
+  const c = card('plan', 'Proposed plan — edit if you like, then approve', `<textarea class="mono" rows="12">${esc(plan)}</textarea>
+    <div class="row" style="margin-top:8px"><button class="ok" data-m="auto">Approve & run autonomously</button>
+    <button data-m="manual">Approve & run with edit approvals</button><button class="danger" data-m="reject">Reject</button></div>`);
+  c.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const m = b.dataset.m;
+    api('/api/plan', m === 'reject' ? {action: 'reject'} : {action: 'approve', exec_mode: m, plan: c.querySelector('textarea').value})
+      .then(r => { if (!r.ok) return alert(r.error); c.querySelector('.row').outerHTML = `<div class="hint">${m === 'reject' ? 'Rejected' : 'Approved (' + m + ')'}</div>`; });
+  });
+}
+
+$('go').onclick = () => { const task = $('task').value.trim(); if (!task) return;
+  api('/api/task', {task, mode: $('mode').value}).then(r => r.ok ? $('task').value = '' : alert(r.error)); };
+$('task').onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('go').click(); };
+$('stop').onclick = () => api('/api/stop', {});
+$('logBtn').onclick = () => { const on = $('log').classList.toggle('show'); $('logBtn').textContent = on ? 'Hide log' : 'Show log'; };
+$('clearLog').onclick = () => logout.textContent = '';
+const F = ['base_url', 'model', 'api_key', 'workspace', 'max_steps', 'temperature'];
+$('setBtn').onclick = () => api('/api/settings').then(s => { F.forEach(k => $('s_' + k).value = s[k]); $('settings').showModal(); });
+$('saveSet').onclick = () => { const b = {}; F.forEach(k => b[k] = $('s_' + k).value);
+  b.max_steps = +b.max_steps; b.temperature = +b.temperature; api('/api/settings', b); };
+
+new EventSource('/api/events').onmessage = m => handle(JSON.parse(m.data));
+</script>
+</body>
+</html>
